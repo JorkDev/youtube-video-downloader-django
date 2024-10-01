@@ -1,44 +1,44 @@
-# Use an official Python runtime as a parent image
-FROM python:3.10-slim
 
-# Set environment variables for Python and Django
-ENV PYTHONDONTWRITEBYTECODE=1  # Prevents Python from writing .pyc files to disk
-ENV PYTHONUNBUFFERED=1  # Ensures that the Python output is sent straight to the terminal (e.g., for logging)
-ENV DJANGO_ENV=production  # Environment variable for Django settings
+# Stage 1: Build stage
+FROM python:3.10-slim AS build
 
 # Set work directory
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies required to build the app
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libpq-dev \
-    build-essential \
-    curl \
+    build-essential gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pipenv to manage dependencies more efficiently
+# Install pipenv for managing Python dependencies
 RUN pip install --no-cache-dir pipenv
 
-# Copy the Pipfile and Pipfile.lock to the container
+# Copy Pipfile and Pipfile.lock to the container
 COPY Pipfile Pipfile.lock /app/
 
-# Install Python dependencies via Pipenv
-RUN pipenv install --system --deploy --ignore-pipfile
+# Install dependencies
+RUN pipenv install --deploy --ignore-pipfile
 
-# Copy the Django project files to the container
+# Copy the rest of the application code to the container
 COPY . /app/
 
-# Expose the port that the Django app will be served on
+# Stage 2: Production stage
+FROM python:3.10-slim AS production
+
+# Set work directory
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from the build stage
+COPY --from=build /usr/local/lib/python3.10 /usr/local/lib/python3.10
+COPY --from=build /app /app
+
+# Expose port 8000
 EXPOSE 8000
 
-# Collect static files for production
-RUN python manage.py collectstatic --noinput
-
-# Set proper file permissions to avoid permission issues in containers
-RUN adduser --disabled-password --gecos '' appuser && chown -R appuser /app
-USER appuser
-
-# Start the Django app using gunicorn in production mode
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "3", "video_downloader.wsgi:application"]
-
+# Command to run the application
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "video_downloader.wsgi:application"]
